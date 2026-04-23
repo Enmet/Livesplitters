@@ -1,6 +1,12 @@
+//Original script by Pixelquick. Updated version by Enmet.
+//This script is only compatible with US SNES version of Toy Story.
+//For questions and feedback, go to the Toy Story Speedrun Community Discord Server.
+
 state("higan"){}
 state("snes9x"){}
 state("snes9x-x64"){}
+state("bsnes") {}
+state("emuhawk") {}
 
 startup
 {
@@ -11,6 +17,7 @@ startup
 
 init
 {
+	refreshRate = 30;	//Risk of double splitting at higher refresh rates
 	int memoryOffset = 0;
 	while (memoryOffset == 0)
 	{
@@ -33,6 +40,30 @@ init
 				break;
 			case 8355840: //snes9x (1.55-x64)
 				memoryOffset = memory.ReadValue<int>((IntPtr)0x1405BFDB8);
+				break;
+			case 9646080: //snes9x-rr (1.60)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x97EE04);
+				break;
+			case 13565952: //snes9x-rr (1.60-x64)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x140925118);
+				break;
+			case 9027584: //snes9x (1.60)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x94DB54);
+				break;
+			case 12836864: //snes9x (1.60-x64)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x1408D8BE8);
+				break;
+			case 10399744: //snes9x (1.62.3)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x9B74D0);
+				break;
+			case 15474688: //snes9x (1.62.3-x64)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x140A62390);
+				break;
+			case 11124736: //snes9x (1.63)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0xA63DF0);
+				break;
+			case 16994304: //snes9x (1.63-x64)
+				memoryOffset = memory.ReadValue<int>((IntPtr)0x140BC1CA0);
 				break;
 			case 12509184: //higan (v102)
 				memoryOffset = 0x915304;
@@ -57,9 +88,11 @@ init
 
 	vars.watchers = new MemoryWatcherList
 	{
-    new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x2951) { Name = "Startgame" },
-		new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x001A) { Name = "Currentlevel" }, //Thanks to Enmet for this address
-		new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x1802) { Name = "Buzzcontrol" },
+	new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x000E) { Name = "screenID" },							//Used for dev logos and which menu the game is currently in
+	new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x000F) { Name = "screenID2" },							//Similar to above, but only ever changes for the TT and Psyg logos
+    new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x0A14) { Name = "menuArrowX" },							//X-position of the main menu arrow
+	new MemoryWatcher<byte>((IntPtr)memoryOffset + 0x001A) { Name = "levelID" }, 							//Level index, changes after "Level Complete" fades out.
+	new MemoryWatcher<ushort>((IntPtr)memoryOffset + 0x004A) { Name = "CamX" },								//Camera X-position, used as a condition for the final level.
 	};
 }
 
@@ -70,21 +103,33 @@ update
 
 start
 {
-	return vars.watchers["Startgame"].Old == 0 && vars.watchers["Startgame"].Current == 0x80; //Split when Start game is pressed
+	if (vars.watchers["screenID"].Current == 0x02) {
+		return ((vars.watchers["menuArrowX"].Current > 0x83) && (vars.watchers["menuArrowX"].Old < 0x84)); 	//Main menu arrow exceeds 0x83 when start game is triggered
+	}
 }
 
 reset
 {
-  var toTitlelevel = vars.watchers["Currentlevel"].Old != vars.watchers["Currentlevel"].Current && vars.watchers["Currentlevel"].Current == 0x2A; //This resets the timer as soon as the Menu options are shown (after Press Start)
-  var startCanceled = vars.watchers["Startgame"].Old == 0x80 && vars.watchers["Startgame"].Current == 0 && vars.watchers["Currentlevel"].Current == 0x2A; //Needed in case the game is reset before the first level starts
-
-  return toTitlelevel || startCanceled;
+	if (vars.watchers["screenID"].Current == 0x02){															//Main menu and many loading screens uses this index
+		if (vars.watchers["screenID2"].Current == 0x01){													//Is always zero except for dev logos, indicating a soft or hard reset
+			return true;
+		} else {
+			return (vars.watchers["menuArrowX"].Current == 0x83);											//Main menu arrow can be detected from its x-pos for a reset
+		}
+	}
 }
 
 split
 {
-	var levelComplete = vars.watchers["Currentlevel"].Old != vars.watchers["Currentlevel"].Current && vars.watchers["Currentlevel"].Old != 0x2A; //Split as soon as Level complete fades out
-	var finalSplit = vars.watchers["Currentlevel"].Current == 0x10 && vars.watchers["Buzzcontrol"].Old == 0x7E && vars.watchers["Buzzcontrol"].Current == 0x7F; //Split when control of Buzz is lost in the Final level
-
-	return levelComplete || finalSplit;
+	if (vars.watchers["levelID"].Old > 0x0F){    															//Check for final level as it uses a special split condition
+		if (vars.watchers["screenID"].Current == 0x0F){														//Make sure game is still in the level and not in a loading screen
+			if ((vars.watchers["CamX"].Current == 0x3C53) && (vars.watchers["CamX"].Old < 0x3C53)){			//Check pos and against old so script is compatible with multi game setups
+				return true;
+			}
+		}
+	} else { 																								//Splits as soon as "Level Complete" fades out
+		if (vars.watchers["levelID"].Old == (vars.watchers["levelID"].Current - 1)){						//Only if increased by 1, some emus can randomly give the ID large numbers
+			return true;
+		}
+	}
 }
